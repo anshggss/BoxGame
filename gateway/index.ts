@@ -1,3 +1,4 @@
+import createRoom from "./routes/createRoom";
 import express from "express";
 import addToRoom from "./routes/addToRoom";
 import { createClient } from "redis";
@@ -14,6 +15,7 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 app.post("/add", addToRoom);
+app.get("/createRoom", createRoom);
 
 app.listen(port, () => {
   console.log(`Listening on ${port}`);
