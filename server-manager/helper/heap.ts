@@ -79,6 +79,10 @@ class Heap {
       return undefined;
     }
     let el = this.heap[0];
+    if (el == undefined) {
+      return;
+    }
+    delete this.curList[el.port];
     this.heap = this.heap.slice(1);
     this.heapify();
     return el;
