@@ -2,17 +2,10 @@
 import express from "express";
 import assignServer from "./routes/assignServer";
 import Heap from "./helper/heap";
-import { KubeConfig, CoreV1Api } from "@kubernetes/client-node";
 import handleRegister from "./routes/handleRegister";
 
 const app = express();
 const port = process.env.PORT || 4689;
-const kc = new KubeConfig();
-kc.loadFromDefault();
-const k8sApi = kc.makeApiClient(CoreV1Api);
-const servers = await k8sApi.listNamespacedPod({
-  namespace: "box-game-servers",
-});
 
 const connections = new Heap();
 

@@ -1,0 +1,5 @@
+The server manager is done
+
+We need to configure the server to 
+1. Bind the server to the Node's IP on a random ass port
+2. Register itself to the server-manager when it's on
