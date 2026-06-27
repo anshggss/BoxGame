@@ -63,13 +63,14 @@ class Heap {
     });
   }
 
-  push(connection: Server) {
+  push(connection: Server): string {
     if (this.curList[connection.port] != undefined) {
-      return;
+      return "present";
     }
     this.curList[connection.port] = connection.connections;
     this.heap.push(connection);
     this.heapify();
+    return "added";
   }
 
   pop() {

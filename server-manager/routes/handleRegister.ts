@@ -16,8 +16,14 @@ const handleRegister = (req: Request, res: Response) => {
   if (!server.connections) {
     server.connections = 0;
   }
-  connections.push(server);
+  let stat = connections.push(server);
+  if (stat == "present") {
+    res.status(400).send("No bro you're already present");
+    return;
+  }
+  console.log(connections.heap);
   res.status(200).send("Yay now you're registered hehehehehe!");
+  return;
 };
 
 export default handleRegister;
