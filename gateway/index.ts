@@ -1,24 +1,21 @@
 import createRoom from "./routes/createRoom";
 import express from "express";
 import addToRoom from "./routes/addToRoom";
-import { createClient } from "redis";
 
-const redisURL: string = process.env.REDIS_URL!;
-const client = createClient({ url: redisURL });
-try {
-  await client.connect();
-} catch (e) {
-  console.error(e);
-  process.exit(1);
-}
 const app = express();
+app.use(express.json());
 const port = process.env.PORT || 3000;
+let roomMaps: { [id: string]: { [id: string]: string | number } } = {};
 
-app.post("/add", addToRoom);
+// Kubernetes health probe
+app.get("/healthz", (_, res) => res.status(200).send("ok"));
+// Adds a client to a given room
+app.get("/add", addToRoom);
+// Allocates a room to a client
 app.get("/createRoom", createRoom);
 
 app.listen(port, () => {
   console.log(`Listening on ${port}`);
 });
 
-export default client;
+export default roomMaps;

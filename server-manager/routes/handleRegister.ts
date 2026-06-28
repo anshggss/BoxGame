@@ -12,7 +12,7 @@ const handleRegister = (req: Request, res: Response) => {
     res.status(401).send("Invalid server info");
     return;
   }
-  const server = req.body.serverInfo;
+  const server = req.body; // server.ts sends flat: { hostIp, port, connections }
   if (!server.hostIp || !server.port) {
     res.status(401).send("Invalid server info");
     return;
