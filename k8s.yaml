@@ -1,0 +1,324 @@
+# =============================================================================
+# BoxGame – Kubernetes Manifests
+# =============================================================================
+# Topology
+#   [Vercel client]
+#       │  HTTP / WebSocket
+#       ▼
+#   [gateway]  ─────────────────────────────►  [server-manager]
+#       │  sets cookies (hostIp, port, roomID)        │
+#       │                                             │  spawns / tracks
+#       │                                             ▼
+#       └────────────────────────────────────  [game-server pods]
+#                                              (hostNetwork, dynamic port)
+#
+# Namespaces
+#   box-game          – gateway + server-manager
+#   box-game-servers  – dynamically created game-server pods
+# =============================================================================
+
+---
+# ─── Namespace: core services ─────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: box-game
+
+---
+# ─── Namespace: game server pods ──────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: box-game-servers
+
+---
+# =============================================================================
+# RBAC – server-manager needs to create/delete Pods in box-game-servers
+# =============================================================================
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: server-manager-sa
+  namespace: box-game
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-manager
+  namespace: box-game-servers
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: server-manager-pod-manager
+  namespace: box-game-servers
+subjects:
+  - kind: ServiceAccount
+    name: server-manager-sa
+    namespace: box-game
+roleRef:
+  kind: Role
+  name: pod-manager
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# =============================================================================
+# SERVER-MANAGER
+# =============================================================================
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server-manager
+  namespace: box-game
+  labels:
+    app: server-manager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: server-manager
+  template:
+    metadata:
+      labels:
+        app: server-manager
+    spec:
+      serviceAccountName: server-manager-sa
+      containers:
+        - name: server-manager
+          image: docker.io/shadyggs/boxgame-server-manager:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 4689
+              name: http
+          env:
+            - name: PORT
+              value: "4689"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 4689
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 4689
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server-manager-svc
+  namespace: box-game
+  labels:
+    app: server-manager
+spec:
+  selector:
+    app: server-manager
+  ports:
+    - port: 4689
+      targetPort: 4689
+      protocol: TCP
+      name: http
+  type: ClusterIP
+
+---
+# =============================================================================
+# GATEWAY
+# =============================================================================
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: box-game
+  labels:
+    app: gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      containers:
+        - name: gateway
+          image: docker.io/shadyggs/boxgame-gateway:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: PORT
+              value: "3000"
+            # Talk to server-manager inside the cluster
+            - name: SERVER_MANAGER_URL
+              value: "http://server-manager-svc.box-game.svc.cluster.local:4689"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-svc
+  namespace: box-game
+  labels:
+    app: gateway
+spec:
+  selector:
+    app: gateway
+  ports:
+    - port: 80
+      targetPort: 3000
+      protocol: TCP
+      name: http
+  # Change to LoadBalancer if your cluster is on a cloud provider
+  type: LoadBalancer
+
+---
+# =============================================================================
+# GAME-SERVER POD TEMPLATE (used by server-manager to spawn pods)
+# =============================================================================
+# This ConfigMap stores the pod spec that server-manager reads at runtime
+# to create new game-server pods dynamically via the k8s API.
+# Update the image name below to match your actual registry tag.
+# =============================================================================
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: game-server-pod-template
+  namespace: box-game
+data:
+  template.yaml: |
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      namespace: box-game-servers
+      labels:
+        app: game-server
+    spec:
+      # hostNetwork gives the pod a real node-level port so clients
+      # can connect to it directly via the node's external IP.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      restartPolicy: Never
+      containers:
+        - name: game-server
+          image: docker.io/shadyggs/boxgame-server:latest
+          imagePullPolicy: Always
+          env:
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: SERVER_MANAGER_URL
+              value: "http://server-manager-svc.box-game.svc.cluster.local:4689"
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+
+---
+# =============================================================================
+# GAME-SERVER – Pre-scaled Deployment
+# =============================================================================
+# Each pod starts, listens on a random port (listen(0)), then self-registers
+# with server-manager at /register. server-manager's heap is populated this
+# way so /assign can immediately return a server.
+#
+# Increase replicas to pre-warm more server capacity.
+# =============================================================================
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: game-server
+  namespace: box-game-servers
+  labels:
+    app: game-server
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: game-server
+  template:
+    metadata:
+      labels:
+        app: game-server
+    spec:
+      # hostNetwork so the socket.io port is reachable from outside the cluster
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: game-server
+          image: docker.io/shadyggs/boxgame-server:latest
+          imagePullPolicy: Always
+          env:
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: SERVER_MANAGER_URL
+              value: "http://server-manager-svc.box-game.svc.cluster.local:4689"
+          # No fixed containerPort – the server calls listen(0) for a random port
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: 6000   # initial probe port; actual port is random — remove if causing issues
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            failureThreshold: 3
