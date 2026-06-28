@@ -1,12 +1,14 @@
-require("dotenv").config();
+import express from "express";
+import http from "http";
+import { AddressInfo } from "net";
+import { Server } from "socket.io";
 
-const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
+// Register the server to server-manager
 
 // Create server
 const app = express();
 const server = http.createServer(app);
+// This io creates a new socket connection for the clients to connect to
 const io = new Server(server, {
   cors: { origin: "*" },
   pingInterval: 10000,
@@ -15,10 +17,9 @@ const io = new Server(server, {
 });
 
 // Interaction constants
-const port = parseInt(process.env.PORT) || 3000;
 const RES_WIDTH = 1280;
 const RES_HEIGHT = 720;
-const tick = parseInt(process.env.TICK, 10) || 120;
+const tick = 120;
 
 // Game constants
 const gravity = 0.5;
@@ -30,12 +31,21 @@ const MAX_PLAYERS_PER_ROOM = 20;
 
 // Color palette for players
 const playerColors = [
-  "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4",
-  "#FFEAA7", "#DDA0DD", "#98D8C8", "#F7DC6F",
-  "#BB8FCE", "#85C1E9", "#F0B27A", "#82E0AA",
+  "#FF6B6B",
+  "#4ECDC4",
+  "#45B7D1",
+  "#96CEB4",
+  "#FFEAA7",
+  "#DDA0DD",
+  "#98D8C8",
+  "#F7DC6F",
+  "#BB8FCE",
+  "#85C1E9",
+  "#F0B27A",
+  "#82E0AA",
 ];
 
-function getRandomBetween(min, max) {
+function getRandomBetween(min: number, max: number) {
   return Math.random() * (max - min) + min;
 }
 
@@ -81,9 +91,15 @@ function buildPlatformGrid() {
   for (let i = 0; i < world.platforms.length; i++) {
     const p = world.platforms[i];
     const startCol = Math.max(0, Math.floor(p.x / GRID_CELL_SIZE));
-    const endCol = Math.min(GRID_COLS - 1, Math.floor((p.x + p.width) / GRID_CELL_SIZE));
+    const endCol = Math.min(
+      GRID_COLS - 1,
+      Math.floor((p.x + p.width) / GRID_CELL_SIZE),
+    );
     const startRow = Math.max(0, Math.floor(p.y / GRID_CELL_SIZE));
-    const endRow = Math.min(GRID_ROWS - 1, Math.floor((p.y + p.height) / GRID_CELL_SIZE));
+    const endRow = Math.min(
+      GRID_ROWS - 1,
+      Math.floor((p.y + p.height) / GRID_CELL_SIZE),
+    );
     for (let row = startRow; row <= endRow; row++) {
       for (let col = startCol; col <= endCol; col++) {
         platformGrid[row * GRID_COLS + col].push(world.platforms[i]);
@@ -93,13 +109,45 @@ function buildPlatformGrid() {
 }
 buildPlatformGrid();
 
-const _seen = [];
-const _result = [];
-function getNearbyPlatforms(player) {
+const _seen: Platform[] = [];
+const _result: Platform[] = [];
+
+interface Rectangle {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+type Platform = Rectangle;
+
+interface Target extends Rectangle {}
+
+interface Player extends Rectangle {
+  id: string;
+  color: string;
+  velocityX: number;
+  velocityY: number;
+  speed: number;
+  isGrounded: boolean;
+  name: string;
+  score: number;
+  highScore: number;
+  inputLeft: boolean;
+  inputRight: boolean;
+  inputJump: boolean;
+}
+function getNearbyPlatforms(player: Player): Platform[] {
   const startCol = Math.max(0, Math.floor(player.x / GRID_CELL_SIZE));
-  const endCol = Math.min(GRID_COLS - 1, Math.floor((player.x + player.width) / GRID_CELL_SIZE));
+  const endCol = Math.min(
+    GRID_COLS - 1,
+    Math.floor((player.x + player.width) / GRID_CELL_SIZE),
+  );
   const startRow = Math.max(0, Math.floor(player.y / GRID_CELL_SIZE));
-  const endRow = Math.min(GRID_ROWS - 1, Math.floor((player.y + player.height) / GRID_CELL_SIZE));
+  const endRow = Math.min(
+    GRID_ROWS - 1,
+    Math.floor((player.y + player.height) / GRID_CELL_SIZE),
+  );
   _seen.length = 0;
   _result.length = 0;
   for (let row = startRow; row <= endRow; row++) {
@@ -107,7 +155,10 @@ function getNearbyPlatforms(player) {
       const cell = platformGrid[row * GRID_COLS + col];
       for (let i = 0; i < cell.length; i++) {
         const plat = cell[i];
-        if (_seen.indexOf(plat) === -1) { _seen.push(plat); _result.push(plat); }
+        if (_seen.indexOf(plat) === -1) {
+          _seen.push(plat);
+          _result.push(plat);
+        }
       }
     }
   }
@@ -116,37 +167,69 @@ function getNearbyPlatforms(player) {
 
 // ============== ROOM MANAGEMENT ==============
 // rooms[roomCode] = { players, target, lastSentState, fullSyncCounter, pendingScoreEvents }
-const rooms = {};
-
-function generateRoomCode() {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return code;
+//
+// Rooms interface
+interface Target {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
-function createRoom() {
-  let code;
-  do { code = generateRoomCode(); } while (rooms[code]);
-
-  rooms[code] = {
-    players: {},
-    playerCount: 0,
-    target: {
-      x: Math.random() * 1280,
-      y: getRandomBetween(40, 250),
-      color: "green",
-      width: 10,
-      height: 10,
-    },
-    lastSentState: {},
-    fullSyncCounter: 0,
-    pendingScoreEvents: [],
-  };
-  return code;
+interface ScoreEvent {
+  playerName: string;
+  score: number;
+  x: number;
+  y: number;
 }
 
-function deleteRoomIfEmpty(code) {
+interface CachedPlayerState {
+  x: number;
+  y: number;
+  score: number;
+  name: string;
+}
+
+interface Player {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: string;
+  velocityX: number;
+  velocityY: number;
+  speed: number;
+  isGrounded: boolean;
+  name: string;
+  score: number;
+  highScore: number;
+  inputLeft: boolean;
+  inputRight: boolean;
+  inputJump: boolean;
+}
+
+interface Room {
+  players: Record<string, Player>;
+  playerCount: number;
+  target: Target;
+  lastSentState: Record<string, CachedPlayerState>;
+  fullSyncCounter: number;
+  pendingScoreEvents: ScoreEvent[];
+}
+interface ClientPlayerState extends Rectangle {
+  id: string;
+  color: string;
+  velocityX: number;
+  velocityY: number;
+  name: string;
+  score: number;
+}
+type Rooms = Record<string, Room>;
+
+const rooms: Rooms = {};
+
+function deleteRoomIfEmpty(code: string) {
   const room = rooms[code];
   if (room && room.playerCount === 0) {
     delete rooms[code];
@@ -155,12 +238,16 @@ function deleteRoomIfEmpty(code) {
 }
 
 // ============== GAME LOGIC ==============
-function isColliding(a, b) {
-  return a.x + a.width > b.x && a.x < b.x + b.width &&
-         a.y + a.height > b.y && a.y < b.y + b.height;
+function isColliding(a: Rectangle, b: Rectangle) {
+  return (
+    a.x + a.width > b.x &&
+    a.x < b.x + b.width &&
+    a.y + a.height > b.y &&
+    a.y < b.y + b.height
+  );
 }
 
-function respawnPlayer(player) {
+function respawnPlayer(player: Player) {
   player.x = RESPAWN_X;
   player.y = RESPAWN_Y;
   player.velocityX = 0;
@@ -170,15 +257,25 @@ function respawnPlayer(player) {
   player.score = 0;
 }
 
-function checkBounds(player) {
-  if (player.x + player.width > RES_WIDTH) { player.x = RES_WIDTH - player.width; player.velocityX = 0; }
-  if (player.x < 0) { player.x = 0; player.velocityX = 0; }
+function checkBounds(player: Player) {
+  if (player.x + player.width > RES_WIDTH) {
+    player.x = RES_WIDTH - player.width;
+    player.velocityX = 0;
+  }
+  if (player.x < 0) {
+    player.x = 0;
+    player.velocityX = 0;
+  }
   if (player.y > RES_HEIGHT) respawnPlayer(player);
-  if (player.y < 0) { player.y = 0; player.velocityY = 0; }
+  if (player.y < 0) {
+    player.y = 0;
+    player.velocityY = 0;
+  }
 }
 
-function repositionTarget(target) {
-  let valid = false, attempts = 0;
+function repositionTarget(target: Target) {
+  let valid = false,
+    attempts = 0;
   while (!valid && attempts < 50) {
     target.x = Math.random() * (RES_WIDTH - target.width);
     target.y = getRandomBetween(40, 250);
@@ -186,30 +283,43 @@ function repositionTarget(target) {
     attempts++;
     for (let i = 0; i < world.platforms.length; i++) {
       const p = world.platforms[i];
-      if (target.x + target.width > p.x && target.x < p.x + p.width &&
-          target.y + target.height > p.y && target.y < p.y + p.height) {
-        valid = false; break;
+      if (
+        target.x + target.width > p.x &&
+        target.x < p.x + p.width &&
+        target.y + target.height > p.y &&
+        target.y < p.y + p.height
+      ) {
+        valid = false;
+        break;
       }
     }
   }
 }
 
-function checkTargetCollision(player, room) {
+function checkTargetCollision(player: Player, room: Room) {
   if (isColliding(player, room.target)) {
     player.score++;
     if (player.score > player.highScore) player.highScore = player.score;
-    room.pendingScoreEvents.push({ playerName: player.name, score: player.score, x: room.target.x, y: room.target.y });
+    room.pendingScoreEvents.push({
+      playerName: player.name,
+      score: player.score,
+      x: room.target.x,
+      y: room.target.y,
+    });
     repositionTarget(room.target);
   }
 }
 
-function applyGravity(player) {
+function applyGravity(player: Player) {
   player.velocityY += gravity;
   player.y += player.velocityY;
   player.x += player.velocityX;
   player.isGrounded = false;
   if (isColliding(player, world.ground)) {
-    if (player.y + player.height > world.ground.y && player.y < world.ground.y) {
+    if (
+      player.y + player.height > world.ground.y &&
+      player.y < world.ground.y
+    ) {
       player.velocityY = 0;
       player.y = world.ground.y - player.height;
       player.isGrounded = true;
@@ -217,65 +327,115 @@ function applyGravity(player) {
   }
 }
 
-function checkPlatformCollision(player, platform) {
+function checkPlatformCollision(player: Player, platform: Rectangle) {
   if (!isColliding(player, platform)) return;
-  const overlapLeft   = player.x + player.width  - platform.x;
-  const overlapRight  = platform.x + platform.width  - player.x;
-  const overlapTop    = player.y + player.height - platform.y;
+  const overlapLeft = player.x + player.width - platform.x;
+  const overlapRight = platform.x + platform.width - player.x;
+  const overlapTop = player.y + player.height - platform.y;
   const overlapBottom = platform.y + platform.height - player.y;
-  const minOverlap    = Math.min(overlapLeft, overlapRight, overlapTop, overlapBottom);
-  if      (minOverlap === overlapTop    && player.velocityY >= 0) { player.y = platform.y - player.height; player.velocityY = 0; player.isGrounded = true; }
-  else if (minOverlap === overlapBottom && player.velocityY < 0)  { player.y = platform.y + platform.height; player.velocityY = 0; }
-  else if (minOverlap === overlapLeft)  { player.x = platform.x - player.width;  player.velocityX = 0; }
-  else if (minOverlap === overlapRight) { player.x = platform.x + platform.width; player.velocityX = 0; }
+  const minOverlap = Math.min(
+    overlapLeft,
+    overlapRight,
+    overlapTop,
+    overlapBottom,
+  );
+  if (minOverlap === overlapTop && player.velocityY >= 0) {
+    player.y = platform.y - player.height;
+    player.velocityY = 0;
+    player.isGrounded = true;
+  } else if (minOverlap === overlapBottom && player.velocityY < 0) {
+    player.y = platform.y + platform.height;
+    player.velocityY = 0;
+  } else if (minOverlap === overlapLeft) {
+    player.x = platform.x - player.width;
+    player.velocityX = 0;
+  } else if (minOverlap === overlapRight) {
+    player.x = platform.x + platform.width;
+    player.velocityX = 0;
+  }
 }
 
-function processInputs(player) {
+function processInputs(player: Player) {
   player.velocityX = 0;
-  if (player.inputLeft)  player.velocityX = -player.speed;
-  if (player.inputRight) player.velocityX =  player.speed;
-  if (player.inputJump && player.isGrounded) { player.velocityY = jumpPower; player.isGrounded = false; }
+  if (player.inputLeft) player.velocityX = -player.speed;
+  if (player.inputRight) player.velocityX = player.speed;
+  if (player.inputJump && player.isGrounded) {
+    player.velocityY = jumpPower;
+    player.isGrounded = false;
+  }
 }
 
-function updateRoom(room) {
+function updateRoom(room: Room) {
   for (const id in room.players) {
     const player = room.players[id];
     processInputs(player);
     applyGravity(player);
     const nearby = getNearbyPlatforms(player);
-    for (let i = 0; i < nearby.length; i++) checkPlatformCollision(player, nearby[i]);
+    for (let i = 0; i < nearby.length; i++)
+      checkPlatformCollision(player, nearby[i]);
     checkBounds(player);
     checkTargetCollision(player, room);
   }
 }
 
-function buildClientState(room) {
-  const slim = {};
+function buildClientState(room: Room) {
+  const slim: Record<string, ClientPlayerState> = {};
   for (const id in room.players) {
     const p = room.players[id];
-    slim[id] = { id: p.id, x: p.x, y: p.y, width: p.width, height: p.height, color: p.color, velocityX: p.velocityX, velocityY: p.velocityY, name: p.name, score: p.score };
+    slim[id] = {
+      id: p.id,
+      x: p.x,
+      y: p.y,
+      width: p.width,
+      height: p.height,
+      color: p.color,
+      velocityX: p.velocityX,
+      velocityY: p.velocityY,
+      name: p.name,
+      score: p.score,
+    };
   }
   return slim;
 }
 
-function buildDeltaState(room) {
-  const delta = {};
+function buildDeltaState(room: Room) {
+  const delta: Record<string, ClientPlayerState | null> = {};
   let hasChanges = false;
   for (const id in room.players) {
     const p = room.players[id];
     const last = room.lastSentState[id];
-    if (!last || Math.abs(p.x - last.x) > 0.5 || Math.abs(p.y - last.y) > 0.5 || p.score !== last.score || p.name !== last.name) {
-      delta[id] = { id: p.id, x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10, width: p.width, height: p.height, color: p.color, velocityX: Math.round(p.velocityX * 10) / 10, velocityY: Math.round(p.velocityY * 10) / 10, name: p.name, score: p.score };
+    if (
+      !last ||
+      Math.abs(p.x - last.x) > 0.5 ||
+      Math.abs(p.y - last.y) > 0.5 ||
+      p.score !== last.score ||
+      p.name !== last.name
+    ) {
+      delta[id] = {
+        id: p.id,
+        x: Math.round(p.x * 10) / 10,
+        y: Math.round(p.y * 10) / 10,
+        width: p.width,
+        height: p.height,
+        color: p.color,
+        velocityX: Math.round(p.velocityX * 10) / 10,
+        velocityY: Math.round(p.velocityY * 10) / 10,
+        name: p.name,
+        score: p.score,
+      };
       hasChanges = true;
     }
   }
   for (const id in room.lastSentState) {
-    if (!room.players[id]) { delta[id] = null; hasChanges = true; }
+    if (!room.players[id]) {
+      delta[id] = null;
+      hasChanges = true;
+    }
   }
   return hasChanges ? delta : null;
 }
 
-function cacheRoomState(room) {
+function cacheRoomState(room: Room) {
   room.lastSentState = {};
   for (const id in room.players) {
     const p = room.players[id];
@@ -285,18 +445,18 @@ function cacheRoomState(room) {
 
 // ============== SOCKET CONNECTION ==============
 io.on("connection", (socket) => {
-  let currentRoomCode = null;
+  let currentRoomCode: string | null = null;
 
   console.log(`Connected: ${socket.id}`);
 
   // ---- CREATE ROOM ----
-  socket.on("createRoom", (playerName, callback) => {
+  socket.on("createRoom", (playerName, roomId, callback) => {
     if (currentRoomCode) {
       // Leave existing room first
       leaveCurrentRoom();
     }
 
-    const code = createRoom();
+    const code = roomId;
     currentRoomCode = code;
     socket.join(code);
 
@@ -315,11 +475,13 @@ io.on("connection", (socket) => {
     const room = rooms[code];
 
     if (!room) {
-      if (typeof callback === "function") callback({ success: false, error: "Room not found." });
+      if (typeof callback === "function")
+        callback({ success: false, error: "Room not found." });
       return;
     }
     if (room.playerCount >= MAX_PLAYERS_PER_ROOM) {
-      if (typeof callback === "function") callback({ success: false, error: "Room is full." });
+      if (typeof callback === "function")
+        callback({ success: false, error: "Room is full." });
       return;
     }
 
@@ -343,7 +505,9 @@ io.on("connection", (socket) => {
     const player = rooms[currentRoomCode].players[socket.id];
     if (!player) return;
     player.name = sanitizeName(newName);
-    console.log(`${socket.id} changed name to "${player.name}" in room ${currentRoomCode}`);
+    console.log(
+      `${socket.id} changed name to "${player.name}" in room ${currentRoomCode}`,
+    );
   });
 
   // ---- INPUTS ----
@@ -351,9 +515,9 @@ io.on("connection", (socket) => {
     if (!currentRoomCode || !rooms[currentRoomCode]) return;
     const player = rooms[currentRoomCode].players[socket.id];
     if (!player || !input) return;
-    player.inputLeft  = !!input.left;
+    player.inputLeft = !!input.left;
     player.inputRight = !!input.right;
-    player.inputJump  = !!input.jump;
+    player.inputJump = !!input.jump;
   });
 
   // Legacy "name" event for compatibility
@@ -395,7 +559,11 @@ setInterval(() => {
     if (room.fullSyncCounter >= tick * 2) {
       room.fullSyncCounter = 0;
       const fullState = buildClientState(room);
-      io.to(code).emit("gameState", { target: room.target, players: fullState, full: true });
+      io.to(code).emit("gameState", {
+        target: room.target,
+        players: fullState,
+        full: true,
+      });
       cacheRoomState(room);
     } else {
       const delta = buildDeltaState(room);
@@ -415,13 +583,13 @@ setInterval(() => {
 }, 1000 / tick);
 
 // ============== HELPERS ==============
-function sanitizeName(name) {
+function sanitizeName(name: string) {
   if (typeof name !== "string") return "Player";
   const s = name.trim().slice(0, 15);
   return s.length === 0 ? "Player" : s;
 }
 
-function makePlayer(id, name) {
+function makePlayer(id: string, name: string) {
   return {
     id,
     x: RESPAWN_X,
@@ -443,12 +611,26 @@ function makePlayer(id, name) {
 }
 
 // Status endpoint
-app.get("/status", (req, res) => {
-  const totalPlayers = Object.values(rooms).reduce((acc, r) => acc + r.playerCount, 0);
-  res.json({ rooms: Object.keys(rooms).length, players: totalPlayers, uptime: process.uptime() });
+app.get("/status", () => {
+  console.log("Server is upppp");
 });
 
-server.listen(port, () => {
-  console.log(`Server running on http://localhost:${port}`);
+server.listen(0, async () => {
+  const address = server.address() as AddressInfo;
+  const serverInfo = {
+    hostIp: process.env.HOST_IP,
+    port: address.port,
+    connections: 0,
+  };
+
+  await fetch(`${process.env.SERVER_MANAGER_URL}/register`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(serverInfo),
+  });
+
+  console.log(`Server running on http://localhost:${address.port}`);
   console.log(`Tick rate: ${tick}`);
 });

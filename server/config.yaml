@@ -1,2 +1,22 @@
-# This is the kubernetes config for the server pods
-# Configure this to bind the pods to it's node's port
+apiVersion: v1
+kind: Pod
+metadata:
+  name: game-server
+  namespace: box-game-servers
+
+spec:
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+
+  containers:
+    - name: game-server
+      image: your-image:latest
+
+      env:
+        - name: HOST_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+
+        - name: SERVER_MANAGER_URL
+          value: http://localhost:4289
