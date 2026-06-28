@@ -1,5 +1,6 @@
+import { type Request, type Response } from "express";
 import client from "../index.ts";
-const addToRoom = async () => {
+const addToRoom = async (req: Request, res: Response) => {
   try {
     const roomId = await client.get("key");
     if (roomId == null) {

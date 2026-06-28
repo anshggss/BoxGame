@@ -1,0 +1,2 @@
+# This is the kubernetes config for the server pods
+# Configure this to bind the pods to it's node's port
