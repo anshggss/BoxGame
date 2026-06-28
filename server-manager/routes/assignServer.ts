@@ -5,7 +5,7 @@ const assignServer = async (req: Request, res: Response) => {
   // Increment the number of connections for the bestServer
   if (bestServer == undefined) {
     console.error("No servers in the discovery");
-    res.send(405).send("No servers available");
+    res.status(405).send("No servers available");
     return;
   }
 

@@ -19,33 +19,44 @@ class Heap {
   // by portNumber -> connections
   curList: { [id: number]: number } = {};
 
-  heapify() {
-    this.heapifyHelper(0);
+  swap(a: number, b: number) {
+    let temp = this.heap[a];
+    this.heap[a] = this.heap[b]!;
+    this.heap[b] = temp!;
   }
 
-  private heapifyHelper(i: number) {
-    let largest = i;
-    let l = 2 * i + 1;
-    let r = 2 * i + 2;
-    // Fix this nightmare
-    // PS: I'm not used to typing
-    if (
-      l < this.heap.length &&
-      this.heap[l]!.connections < this.heap[i]!.connections
-    ) {
-      largest = l;
+  bubbleUp(i: number) {
+    while (i > 0) {
+      const parent = Math.floor((i - 1) / 2);
+
+      if (this.heap[parent]!.connections < this.heap[i]!.connections) {
+        break;
+      }
+      this.swap(i, parent);
+      i = parent;
     }
-    if (
-      r < this.heap.length &&
-      this.heap[r]!.connections < this.heap[i]!.connections
-    ) {
-      largest = r;
-    }
-    if (largest != i) {
-      let temp = this.heap[largest];
-      this.heap[largest] = this.heap[i]!;
-      this.heap[i] = temp!;
-      this.heapifyHelper(largest);
+  }
+
+  bubbleDown(i: number) {
+    while (true) {
+      let smallest = i;
+      const left = 2 * i + 1;
+      const right = 2 * i + 2;
+      if (
+        left < this.heap.length &&
+        this.heap[left]!.connections < this.heap[smallest]!.connections
+      ) {
+        smallest = left;
+      }
+      if (
+        right < this.heap.length &&
+        this.heap[right]!.connections < this.heap[smallest]!.connections
+      ) {
+        smallest = right;
+      }
+      if (smallest == i) break;
+      this.swap(smallest, i);
+      i = smallest;
     }
   }
 
@@ -57,7 +68,7 @@ class Heap {
     this.heap.forEach((serv, idx) => {
       if (serv.port == server.port && serv.hostIp == server.hostIp) {
         this.heap[idx]!.connections += 1;
-        this.heapify();
+        this.bubbleDown(idx);
         this.curList[server.port]! += 1;
       }
     });
@@ -69,7 +80,7 @@ class Heap {
     }
     this.curList[connection.port] = connection.connections;
     this.heap.push(connection);
-    this.heapify();
+    this.bubbleUp(this.heap.length - 1);
     return "added";
   }
 
@@ -78,14 +89,13 @@ class Heap {
       console.log("Heap is empty");
       return undefined;
     }
-    let el = this.heap[0];
-    if (el == undefined) {
-      return;
-    }
-    delete this.curList[el.port];
-    this.heap = this.heap.slice(1);
-    this.heapify();
-    return el;
+    const root = this.heap[0];
+    this.heap[0] = this.heap.pop()!;
+    delete this.curList[root!.port];
+
+    this.bubbleDown(0);
+
+    return root;
   }
 
   peek(): Server | undefined {

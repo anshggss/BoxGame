@@ -8,6 +8,10 @@ import connections from "../index.ts";
 // }
 
 const handleRegister = (req: Request, res: Response) => {
+  if (!req.body) {
+    res.status(401).send("Invalid server info");
+    return;
+  }
   const server = req.body.serverInfo;
   if (!server.hostIp || !server.port) {
     res.status(401).send("Invalid server info");
