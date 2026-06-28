@@ -25,6 +25,7 @@ class Heap {
     this.heap[b] = temp!;
   }
 
+  // Bubble up used for pushing
   bubbleUp(i: number) {
     while (i > 0) {
       const parent = Math.floor((i - 1) / 2);
@@ -37,6 +38,7 @@ class Heap {
     }
   }
 
+  // Bubble down used for popping
   bubbleDown(i: number) {
     while (true) {
       let smallest = i;
