@@ -1,0 +1,75 @@
+# =============================================================================
+# LOCAL OVERRIDES for minikube testing
+# Apply AFTER k8s.yaml:  kubectl apply -f k8s.yaml -f k8s.local.yaml
+#
+# What this does:
+#   1. Swaps image names to the locally-built tags
+#   2. Sets imagePullPolicy: IfNotPresent so minikube uses cached images
+#   3. Sets ALLOWED_ORIGIN: "*" so the browser can hit the gateway without
+#      a Vercel domain configured
+# =============================================================================
+
+---
+# gateway – override image + pull policy
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: box-game
+spec:
+  template:
+    spec:
+      containers:
+        - name: gateway
+          image: boxgame-gateway:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PORT
+              value: "3000"
+            - name: SERVER_MANAGER_URL
+              value: "http://server-manager-svc.box-game.svc.cluster.local:4689"
+            - name: ALLOWED_ORIGIN
+              value: "*"
+
+---
+# server-manager – override image + pull policy
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server-manager
+  namespace: box-game
+spec:
+  template:
+    spec:
+      serviceAccountName: server-manager-sa
+      containers:
+        - name: server-manager
+          image: boxgame-server-manager:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PORT
+              value: "4689"
+
+---
+# game-server – override image + pull policy
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: game-server
+  namespace: box-game-servers
+spec:
+  template:
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: game-server
+          image: boxgame-server:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: SERVER_MANAGER_URL
+              value: "http://server-manager-svc.box-game.svc.cluster.local:4689"

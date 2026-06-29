@@ -1,17 +1,13 @@
-// ============== SOCKET CONNECTION ==============
-// Points to local server; update to production URL when deploying
-const _host = window.location.hostname;
-const SERVER_URL =
-  _host === "" || _host === "localhost" || _host === "127.0.0.1"
-    ? "http://localhost:3000"
-    : "https://server.boxgame.shadyggs.xyz";
+// ============== CONFIG ==============
+// GATEWAY_URL is injected by index.html as a <script> block so it works
+// both locally and on Vercel without a bundler.
+// Locally:  window.GATEWAY_URL = "http://localhost:3000"
+// Vercel:   window.GATEWAY_URL = "https://<your-vm-ip-or-domain>"
+const GATEWAY_URL = window.GATEWAY_URL || "http://localhost:3000";
 
-const socket = io(SERVER_URL, {
-  reconnectionDelay: 1000,
-  reconnectionDelayMax: 5000,
-  transports: ["websocket"],
-  autoConnect: true,
-});
+// socket is created lazily after a room is assigned so we know which
+// game-server host+port to connect to.
+let socket = null;
 
 let canvas = document.getElementById("gameCanvas");
 let ctx = canvas.getContext("2d");
@@ -43,15 +39,59 @@ let pName = localStorage.getItem("name") || "";
 if (pName) nameInput.value = pName;
 
 // ============== LOBBY ACTIONS ==============
-createRoomBtn.addEventListener("click", () => {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 5; i++)
-    code += chars[Math.floor(Math.random() * chars.length)];
-  currentRoomCode = code;
+createRoomBtn.addEventListener("click", async () => {
+  const name = nameInput.value.trim();
+  if (!name) {
+    showLobbyError("Please enter a name first.");
+    return;
+  }
+  pName = name;
+  localStorage.setItem("name", pName);
+  setLobbyLoading(true);
+
+  try {
+    // Gateway picks the least-loaded game server, sets cookies
+    // (hostIp, port, roomID) and returns.
+    const res = await fetch(`${GATEWAY_URL}/createRoom`, {
+      credentials: "include", // receive the Set-Cookie headers
+    });
+
+    if (!res.ok) {
+      showLobbyError("No game servers available. Try again.");
+      setLobbyLoading(false);
+      return;
+    }
+
+    // Read the cookies the gateway just set
+    const hostIp = getCookie("hostIp");
+    const port = getCookie("port");
+    const roomID = getCookie("roomID");
+
+    if (!hostIp || !port || !roomID) {
+      showLobbyError("Server response missing. Try again.");
+      setLobbyLoading(false);
+      return;
+    }
+
+    // Connect socket directly to the assigned game-server
+    connectSocket(`http://${hostIp}:${port}`, () => {
+      socket.emit("createRoom", pName, roomID, (ack) => {
+        setLobbyLoading(false);
+        if (ack && ack.success) {
+          enterGame(ack.code);
+        } else {
+          showLobbyError("Failed to create room.");
+        }
+      });
+    });
+  } catch (e) {
+    console.error(e);
+    showLobbyError("Could not reach gateway.");
+    setLobbyLoading(false);
+  }
 });
 
-joinRoomBtn.addEventListener("click", () => {
+joinRoomBtn.addEventListener("click", async () => {
   const name = nameInput.value.trim();
   const code = roomCodeInput.value.trim().toUpperCase();
   if (!name) {
@@ -65,14 +105,43 @@ joinRoomBtn.addEventListener("click", () => {
   pName = name;
   localStorage.setItem("name", pName);
   setLobbyLoading(true);
-  socket.emit("joinRoom", { name: pName, code }, (res) => {
-    setLobbyLoading(false);
-    if (res && res.success) {
-      enterGame(res.code);
-    } else {
-      showLobbyError(res ? res.error : "Failed to join room.");
+
+  try {
+    // Ask gateway which server hosts this room
+    const res = await fetch(`${GATEWAY_URL}/add?roomID=${code}`, {
+      credentials: "include",
+    });
+
+    if (!res.ok) {
+      showLobbyError("Room not found or no servers available.");
+      setLobbyLoading(false);
+      return;
     }
-  });
+
+    const hostIp = getCookie("hostIp");
+    const port = getCookie("port");
+
+    if (!hostIp || !port) {
+      showLobbyError("Could not locate room server.");
+      setLobbyLoading(false);
+      return;
+    }
+
+    connectSocket(`http://${hostIp}:${port}`, () => {
+      socket.emit("joinRoom", { name: pName, code }, (ack) => {
+        setLobbyLoading(false);
+        if (ack && ack.success) {
+          enterGame(ack.code);
+        } else {
+          showLobbyError(ack ? ack.error : "Failed to join room.");
+        }
+      });
+    });
+  } catch (e) {
+    console.error(e);
+    showLobbyError("Could not reach gateway.");
+    setLobbyLoading(false);
+  }
 });
 
 roomCodeInput.addEventListener("keydown", (e) => {
@@ -101,6 +170,29 @@ function setLobbyLoading(loading) {
   createRoomBtn.textContent = loading ? "Connecting…" : "✦ Create Private Room";
 }
 
+// ============== SOCKET HELPERS ==============
+// Creates (or re-creates) the socket pointing at a specific game-server.
+function connectSocket(serverUrl, onConnected) {
+  if (socket) {
+    socket.removeAllListeners();
+    socket.disconnect();
+  }
+  socket = io(serverUrl, {
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+    transports: ["websocket"],
+    autoConnect: true,
+  });
+  attachSocketListeners();
+  socket.once("connect", onConnected);
+}
+
+// Reads a cookie by name (needed because gateway uses Set-Cookie)
+function getCookie(name) {
+  const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
+  return match ? decodeURIComponent(match[2]) : null;
+}
+
 function enterGame(code) {
   currentRoomCode = code;
   document.getElementById("nameScreen").style.display = "none";
@@ -109,82 +201,87 @@ function enterGame(code) {
 }
 
 // ============== CONNECTION HANDLING ==============
-socket.on("connect", () => {
-  console.log("Connected:", socket.id);
-  myID = socket.id;
-});
+// Listeners are registered via attachSocketListeners() each time a new
+// socket is created, so they are defined as named functions here.
+function attachSocketListeners() {
+  socket.on("connect", () => {
+    console.log("Connected:", socket.id);
+    myID = socket.id;
+  });
 
-socket.on("disconnect", (reason) => {
-  console.log("Disconnected:", reason);
-  players = {};
-  target = null;
-});
+  socket.on("disconnect", (reason) => {
+    console.log("Disconnected:", reason);
+    players = {};
+    target = null;
+  });
 
-socket.on("connect_error", (err) => {
-  console.error("Connection error:", err.message);
-  showLobbyError("Cannot connect to server.");
-});
+  socket.on("connect_error", (err) => {
+    console.error("Connection error:", err.message);
+    showLobbyError("Cannot connect to server.");
+  });
 
-// ============== WORLD INIT ==============
-socket.on("init", (newWorld) => {
-  world = newWorld;
-  resizeCanvas();
-});
+  // ============== WORLD INIT ==============
+  socket.on("init", (newWorld) => {
+    world = newWorld;
+    resizeCanvas();
+  });
 
-// ============== GAME STATE WITH DELTA MERGE ==============
-socket.on("gameState", (state) => {
-  if (state.target) target = state.target;
-  if (!state.players) return;
+  // ============== GAME STATE WITH DELTA MERGE ==============
+  socket.on("gameState", (state) => {
+    if (state.target) target = state.target;
+    if (!state.players) return;
 
-  if (state.full) {
-    players = state.players;
-  } else {
-    for (const id in state.players) {
-      if (state.players[id] === null) {
-        delete players[id];
-      } else {
-        if (players[id]) {
-          const incoming = state.players[id];
-          const existing = players[id];
-          existing.x = incoming.x;
-          existing.y = incoming.y;
-          existing.width = incoming.width;
-          existing.height = incoming.height;
-          existing.color = incoming.color;
-          existing.velocityX = incoming.velocityX;
-          existing.velocityY = incoming.velocityY;
-          existing.name = incoming.name;
-          existing.score = incoming.score;
-          existing.id = incoming.id;
+    if (state.full) {
+      players = state.players;
+    } else {
+      for (const id in state.players) {
+        if (state.players[id] === null) {
+          delete players[id];
         } else {
-          players[id] = state.players[id];
+          if (players[id]) {
+            const incoming = state.players[id];
+            const existing = players[id];
+            existing.x = incoming.x;
+            existing.y = incoming.y;
+            existing.width = incoming.width;
+            existing.height = incoming.height;
+            existing.color = incoming.color;
+            existing.velocityX = incoming.velocityX;
+            existing.velocityY = incoming.velocityY;
+            existing.name = incoming.name;
+            existing.score = incoming.score;
+            existing.id = incoming.id;
+          } else {
+            players[id] = state.players[id];
+          }
         }
       }
     }
-  }
 
-  if (socket.id && myID !== socket.id) myID = socket.id;
-});
-
-// ============== SERVER FULL ==============
-socket.on("serverFull", (msg) => {
-  alert(msg);
-});
-
-// ============== SCORE EVENTS ==============
-let scorePopups = [];
-
-socket.on("scoreEvent", (data) => {
-  scorePopups.push({
-    text: `${data.playerName} +1`,
-    x: data.x,
-    y: data.y,
-    life: 1.0,
-    decay: 0.02,
+    if (socket.id && myID !== socket.id) myID = socket.id;
   });
-  if (typeof spawnParticles === "function")
-    spawnParticles(data.x, data.y, "#00ff88", 8);
-});
+
+  // ============== SERVER FULL ==============
+  socket.on("serverFull", (msg) => {
+    alert(msg);
+  });
+
+  // ============== SCORE EVENTS ==============
+  socket.on("scoreEvent", (data) => {
+    scorePopups.push({
+      text: `${data.playerName} +1`,
+      x: data.x,
+      y: data.y,
+      life: 1.0,
+      decay: 0.02,
+    });
+    if (typeof spawnParticles === "function")
+      spawnParticles(data.x, data.y, "#00ff88", 8);
+  });
+}
+
+// scorePopups is declared here; listeners are registered in attachSocketListeners()
+let scorePopups = [];
 
 function updateScorePopups() {
   for (let i = scorePopups.length - 1; i >= 0; i--) {
