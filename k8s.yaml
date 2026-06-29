@@ -155,7 +155,7 @@ metadata:
   labels:
     app: gateway
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: gateway
@@ -315,10 +315,3 @@ spec:
             limits:
               cpu: "1000m"
               memory: "512Mi"
-          readinessProbe:
-            httpGet:
-              path: /status
-              port: 6000   # initial probe port; actual port is random — remove if causing issues
-            initialDelaySeconds: 3
-            periodSeconds: 10
-            failureThreshold: 3

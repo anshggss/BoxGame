@@ -3,9 +3,15 @@ import express from "express";
 import assignServer from "./routes/assignServer";
 import Heap from "./helper/heap";
 import handleRegister from "./routes/handleRegister";
+import cors from "cors";
 import { type Request, type Response } from "express";
 
 const app = express();
+app.use(
+  cors({
+    credentials: true,
+  }),
+);
 const port = process.env.PORT || 4689;
 app.use(express.json());
 
