@@ -5,16 +5,18 @@ import addToRoom from "./routes/addToRoom";
 
 const app = express();
 app.use(express.json());
+
+// Allow the client origin to send credentials (cookies).
+// Locally:   ALLOWED_ORIGIN=http://localhost:5500  (or omit for *)
+// On Vercel: ALLOWED_ORIGIN=https://your-app.vercel.app
+const allowedOrigin = process.env.ALLOWED_ORIGIN || "http://localhost:5500";
+
 app.use(
   cors({
-    origin: "http://localhost:3000",
+    origin: allowedOrigin,
     credentials: true,
   }),
 );
-
-// Allow the client origin to send credentials (cookies).
-// Locally: http://localhost:5500 or file:// – use * for dev convenience.
-// On Vercel: set ALLOWED_ORIGIN=https://your-app.vercel.app
 
 const port = process.env.PORT || 3000;
 let roomMaps: { [id: string]: { [id: string]: string | number } } = {};
@@ -28,6 +30,7 @@ app.get("/createRoom", createRoom);
 
 app.listen(port, () => {
   console.log(`Listening on ${port}`);
+  console.log(`CORS allowed origin: ${allowedOrigin}`);
 });
 
 export default roomMaps;

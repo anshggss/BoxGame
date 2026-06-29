@@ -2,8 +2,15 @@
 // GATEWAY_URL is injected by index.html as a <script> block so it works
 // both locally and on Vercel without a bundler.
 // Locally:  window.GATEWAY_URL = "http://localhost:3000"
-// Vercel:   window.GATEWAY_URL = "https://<your-vm-ip-or-domain>"
+// Vercel:   window.GATEWAY_URL = "https://gateway.boxgame.shadyggs.xyz"
 const GATEWAY_URL = window.GATEWAY_URL || "http://localhost:3000";
+
+// In production the game-server domain is server.boxgame.shadyggs.xyz.
+// Nginx terminates TLS for wss://server.boxgame.shadyggs.xyz:<port> and
+// forwards to the hostNetwork pod on the same port.
+// In local dev the cookie will contain "localhost" so http:// is used.
+const isLocalDev = GATEWAY_URL.startsWith("http://");
+const WS_SCHEME = isLocalDev ? "http" : "wss";
 
 // socket is created lazily after a room is assigned so we know which
 // game-server host+port to connect to.
@@ -73,8 +80,8 @@ createRoomBtn.addEventListener("click", async () => {
       return;
     }
 
-    // Connect socket directly to the assigned game-server
-    connectSocket(`http://${hostIp}:${port}`, () => {
+    // Connect socket directly to the assigned game-server via TLS in prod
+    connectSocket(`${WS_SCHEME}://${hostIp}:${port}`, () => {
       socket.emit("createRoom", pName, roomID, (ack) => {
         setLobbyLoading(false);
         if (ack && ack.success) {
@@ -127,7 +134,7 @@ joinRoomBtn.addEventListener("click", async () => {
       return;
     }
 
-    connectSocket(`http://${hostIp}:${port}`, () => {
+    connectSocket(`${WS_SCHEME}://${hostIp}:${port}`, () => {
       socket.emit("joinRoom", { name: pName, code }, (ack) => {
         setLobbyLoading(false);
         if (ack && ack.success) {

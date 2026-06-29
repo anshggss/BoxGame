@@ -615,7 +615,37 @@ app.get("/status", () => {
   console.log("Server is upppp");
 });
 
-server.listen(0, async () => {
+// ============== PORT SELECTION ==============
+// In production, game-server pods must listen on a port within PORT_MIN–PORT_MAX
+// so that the host Nginx stream proxy (which terminates TLS for
+// wss://server.boxgame.shadyggs.xyz:<port>) can forward the traffic.
+// In local dev, PORT_MIN / PORT_MAX are unset → falls back to listen(0).
+const PORT_MIN = process.env.PORT_MIN ? parseInt(process.env.PORT_MIN) : 0;
+const PORT_MAX = process.env.PORT_MAX ? parseInt(process.env.PORT_MAX) : 0;
+
+function pickPort(): number {
+  if (!PORT_MIN || !PORT_MAX) return 0; // let OS pick (local dev)
+  return PORT_MIN + Math.floor(Math.random() * (PORT_MAX - PORT_MIN + 1));
+}
+
+async function startOnPort(port: number, retries = 20): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.once("error", async (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE" && retries > 0) {
+        // Port taken – try another one in the range
+        server.removeAllListeners("error");
+        const next = pickPort();
+        console.warn(`Port ${port} in use, trying ${next}…`);
+        await startOnPort(next, retries - 1).then(resolve).catch(reject);
+      } else {
+        reject(err);
+      }
+    });
+    server.listen(port, resolve);
+  });
+}
+
+startOnPort(pickPort()).then(async () => {
   const address = server.address() as AddressInfo;
   const serverInfo = {
     hostIp: process.env.HOST_IP,
@@ -625,12 +655,14 @@ server.listen(0, async () => {
 
   await fetch(`${process.env.SERVER_MANAGER_URL}/register`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(serverInfo),
   });
 
-  console.log(`Server running on http://localhost:${address.port}`);
+  console.log(`Server running on port ${address.port}`);
+  console.log(`Port range: ${PORT_MIN || "OS-assigned"}–${PORT_MAX || ""}`);
   console.log(`Tick rate: ${tick}`);
+}).catch((err) => {
+  console.error("Failed to bind to any port:", err);
+  process.exit(1);
 });

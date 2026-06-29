@@ -5,6 +5,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Box Game</title>
+    <meta name="description" content="Jump, collect hearts, and beat your friends in Box Game – a fast-paced multiplayer platformer." />
     <link rel="shortcut icon" href="icon.png" type="image" />
     <link rel="stylesheet" href="styles.css" />
 </head>
@@ -63,9 +64,9 @@
     <script src="https://cdn.socket.io/4.8.3/socket.io.min.js"
         integrity="sha384-kzavj5fiMwLKzzD1f8S7TeoVIEi7uKHvbTA3ueZkrzYq75pNQUiUi6Dy98Q3fxb0"
         crossorigin="anonymous"></script>
-    <!-- ⬇ Change this URL when deploying to Vercel (point to your VM's gateway) -->
+    <!-- Gateway URL: set to production gateway for Vercel deployment -->
     <script>
-        window.GATEWAY_URL = "http://localhost:8080";
+        window.GATEWAY_URL = "https://gateway.boxgame.shadyggs.xyz";
     </script>
     <script src="index.js"></script>
     <script src="game.js"></script>
