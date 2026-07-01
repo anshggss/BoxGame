@@ -73,6 +73,7 @@ createRoomBtn.addEventListener("click", async () => {
     const hostIp = getCookie("hostIp");
     const port = getCookie("port");
     const roomID = getCookie("roomID");
+    console.log(`hostIp: ${hostIp}, port: ${port}`);
 
     if (!hostIp || !port || !roomID) {
       showLobbyError("Server response missing. Try again.");
