@@ -61,6 +61,23 @@ canvas {
   }
 }
 
+.github-link {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  z-index: 1;
+  color: rgba(255, 255, 255, .55);
+  font-size: 13px;
+  text-decoration: none;
+  transform: translateX(-50%);
+  transition: color .2s ease;
+}
+
+.github-link:hover,
+.github-link:focus-visible {
+  color: #fff;
+}
+
 .nameBox {
   position: relative;
   z-index: 1;
